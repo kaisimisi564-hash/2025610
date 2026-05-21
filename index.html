@@ -601,6 +601,27 @@ body {
 
     requestAnimationFrame(animate);
 })();
+</script>  
+    <audio id="bg-music" src="music.mp3" loop></audio>
+
+<script>
+  // 核心逻辑：因为浏览器禁止自动播放，必须等用户在屏幕上点一下才触发音乐
+  function playMusic() {
+    const music = document.getElementById('bg-music');
+    if (music && music.paused) {
+      music.play().then(() => {
+        // 播放成功后，移除点击事件，防止重复触发
+        document.removeEventListener('click', playMusic);
+        document.removeEventListener('touchstart', playMusic);
+      }).catch(err => {
+        console.log("播放失败，等待下一次点击:", err);
+      });
+    }
+  }
+
+  // 监听用户的点击或手机触屏事件
+  document.addEventListener('click', playMusic);
+  document.addEventListener('touchstart', playMusic);
 </script>
 </body>
 </html>
