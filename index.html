@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D 照片墙</title>
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #0a0a0a;
+    overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    height: 100vh;
+    width: 100vw;
+    user-select: none;
+}
+
+#container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+
+.overlay {
+    position: fixed;
+    top: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    pointer-events: none;
+    text-align: center;
+}
+
+.overlay .title {
+    font-size: clamp(1.6rem, 4vw, 2.8rem);
+    color: #ffffff;
+    text-shadow: 0 0 20px rgba(255, 105, 180, 0.6),
+                 0 0 40px rgba(255, 105, 180, 0.3);
+    letter-spacing: 0.12em;
+    margin-bottom: 0.6rem;
+    font-weight: bold;
+}
+
+.overlay .subtitle {
+    font-size: clamp(0.85rem, 2vw, 1.1rem);
+    color: rgba(255, 255, 255, 0.55);
+    letter-spacing: 0.15em;
+}
+
+.controls {
+    position: fixed;
+    bottom: 3.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.controls button {
+    padding: 0.65rem 1.8rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    font-size: 0.9rem;
+    font-family: inherit;
+    letter-spacing: 0.06em;
+    border-radius: 2rem;
+    cursor: pointer;
+    transition: all 0.35s;
+    backdrop-filter: blur(10px);
+    outline: none;
+}
+
+.controls button:hover {
+    background: rgba(255, 105, 180, 0.2);
+    border-color: rgba(255, 105, 180, 0.45);
+    box-shadow: 0 0 20px rgba(255, 105, 180, 0.15);
+}
+
+.controls button.active {
+    background: rgba(255, 105, 180, 0.3);
+    border-color: rgba(255, 105, 180, 0.6);
+    box-shadow: 0 0 25px rgba(255, 105, 180, 0.25);
+}
+
+.hint {
+    position: fixed;
+    bottom: 1.2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+}
+</style>
+</head>
+<body>
+
+<div id="container"></div>
+
+<div class="overlay">
+    <div class="title">所有的偶然</div>
+    <div class="subtitle">都是命中注定的必然</div>
+</div>
+
+<div class="controls">
+    <button class="active" data-layout="grid">网格平铺</button>
+    <button data-layout="helix">圆环隧道</button>
+    <button data-layout="wave">波浪起伏</button>
+</div>
+
+<div class="hint">拖拽旋转 &nbsp;|&nbsp; 滚轮缩放 &nbsp;|&nbsp; 右键平移</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+<script>
+(function () {
+    "use strict";
+
+    /* ==================== 场景、相机、渲染器 ==================== */
+
+    var container = document.getElementById("container");
+
+    var scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a10);
+    scene.fog = new THREE.Fog(0x0a0a10, 25, 75);
+
+    var camera = new THREE.PerspectiveCamera(
+        55,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        200
+    );
+    camera.position.set(0, 4, 32);
+    camera.lookAt(0, 0, 0);
+
+    var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x0a0a10);
+    container.appendChild(renderer.domElement);
+
+    /* ==================== 灯光 ==================== */
+
+    var ambientLight = new THREE.AmbientLight(0x404060, 1.0);
+    scene.add(ambientLight);
+
+    var dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(10, 20, 15);
+    scene.add(dirLight);
+
+    var pinkLight = new THREE.PointLight(0xff6699, 0.5, 40);
+    pinkLight.position.set(-10, 6, 10);
+    scene.add(pinkLight);
+
+    var blueLight = new THREE.PointLight(0x6699ff, 0.4, 40);
+    blueLight.position.set(10, -4, -10);
+    scene.add(blueLight);
+
+    /* ==================== 轨道控制器 ==================== */
+
+    var controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.4;
+    controls.minDistance = 8;
+    controls.maxDistance = 70;
+    controls.maxPolarAngle = Math.PI * 0.8;
+    controls.update();
+
+    /* ==================== 爱心粒子系统 ==================== */
+
+    function createHeartSprite() {
+        var size = 64;
+        var canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        var ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+
+        var cx = size / 2;
+        var cy = 28;
+        var scl = 1.1;
+
+        for (var t = 0; t <= Math.PI * 2; t += 0.02) {
+            var hx = 16 * Math.pow(Math.sin(t), 3);
+            var hy = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+            var px = cx + hx * scl;
+            var py = cy + hy * scl;
+            if (t === 0) {
+                ctx.moveTo(px, py);
+            } else {
+                ctx.lineTo(px, py);
+            }
+        }
+
+        ctx.closePath();
+        ctx.fill();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    var heartTexture = createHeartSprite();
+
+    var heartCount = 200;
+    var heartGeo = new THREE.BufferGeometry();
+    var heartPositions = new Float32Array(heartCount * 3);
+    heartGeo.setAttribute("position", new THREE.BufferAttribute(heartPositions, 3));
+
+    var heartMat = new THREE.PointsMaterial({
+        map: heartTexture,
+        color: 0xff7799,
+        size: 1.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0.55,
+    });
+
+    var hearts = new THREE.Points(heartGeo, heartMat);
+    scene.add(hearts);
+
+    var heartData = [];
+    for (var i = 0; i < heartCount; i++) {
+        heartData.push({
+            baseX: (Math.random() - 0.5) * 55,
+            baseZ: (Math.random() - 0.5) * 55,
+            y: (Math.random() - 0.5) * 45,
+            speed: 0.3 + Math.random() * 1.4,
+            phase: Math.random() * Math.PI * 2,
+            amp: 0.6 + Math.random() * 3.5,
+        });
+    }
+
+    /* ==================== 创建卡片纹理 ==================== */
+
+    function createCardTexture(index) {
+        var w = 300;
+        var h = 400;
+        var canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext("2d");
+
+        var hue = (index * 37 + 180) % 360;
+
+        /* 背景渐变 */
+        var grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, "hsl(" + hue + ", 55%, 28%)");
+        grad.addColorStop(0.55, "hsl(" + hue + ", 40%, 14%)");
+        grad.addColorStop(1, "hsl(" + hue + ", 30%, 6%)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        /* 外边框 */
+        ctx.strokeStyle = "rgba(255,255,255,0.25)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(3, 3, w - 6, h - 6);
+
+        /* 照片占位区域 */
+        var phX = 20;
+        var phY = 20;
+        var phW = w - 40;
+        var phH = 280;
+        ctx.fillStyle = "hsla(" + hue + ", 50%, 40%, 0.7)";
+        ctx.fillRect(phX, phY, phW, phH);
+
+        /* 照片区域内的图标 */
+        ctx.fillStyle = "rgba(255,255,255,0.25)";
+        ctx.beginPath();
+        ctx.arc(w / 2, phY + phH / 2 - 15, 55, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.font = "bold 26px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("照片", w / 2, phY + phH / 2 + 5);
+
+        var numText = String(index + 1);
+        ctx.font = "bold 36px sans-serif";
+        ctx.fillText(numText, w / 2, phY + phH / 2 + 48);
+
+        /* 底部文字栏 */
+        var txtY = phY + phH + 10;
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillRect(phX, txtY, phW, h - txtY - 20);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 15px 'Microsoft YaHei', sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("我们的回忆", w / 2, txtY + 28);
+
+        ctx.font = "12px sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        var month = Math.floor(index / 5) + 1;
+        var day = (index % 28) + 1;
+        ctx.fillText("2025." + month + "." + day, w / 2, txtY + 52);
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    /* ==================== 图片路径配置 ==================== */
+    /*
+     * 把照片放到 E:\images\ 文件夹，按 1.jpg ~ 35.jpg 命名，
+     * 然后取消下面数组的注释即可。也支持网络 URL。
+     * 如果某张图片路径没填，会自动用彩色占位卡片代替。
+     */
+    var imagePaths = [
+        // "images/1.jpg",
+        // "images/2.jpg",
+        // "images/3.jpg",
+        // "images/4.jpg",
+        // "images/5.jpg",
+        // "images/6.jpg",
+        // "images/7.jpg",
+        // "images/8.jpg",
+        // "images/9.jpg",
+        // "images/10.jpg",
+        // "images/11.jpg",
+        // "images/12.jpg",
+        // "images/13.jpg",
+        // "images/14.jpg",
+        // "images/15.jpg",
+        // "images/16.jpg",
+        // "images/17.jpg",
+        // "images/18.jpg",
+        // "images/19.jpg",
+        // "images/20.jpg",
+        // "images/21.jpg",
+        // "images/22.jpg",
+        // "images/23.jpg",
+        // "images/24.jpg",
+        // "images/25.jpg",
+        // "images/26.jpg",
+        // "images/27.jpg",
+        // "images/28.jpg",
+        // "images/29.jpg",
+        // "images/30.jpg",
+        // "images/31.jpg",
+        // "images/32.jpg",
+        // "images/33.jpg",
+        // "images/34.jpg",
+        // "images/35.jpg",
+    ];
+
+    /* ==================== 创建卡片网格体 ==================== */
+
+    var cardCount = 35;
+    var cards = [];
+
+    for (var ci = 0; ci < cardCount; ci++) {
+        var tex = createCardTexture(ci);
+        tex.encoding = THREE.sRGBEncoding;
+
+        var mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            roughness: 0.35,
+            metalness: 0.05,
+            side: THREE.DoubleSide,
+        });
+
+        var geo = new THREE.PlaneGeometry(2.5, 3.35);
+        var card = new THREE.Mesh(geo, mat);
+
+        /* 卡片边框线 */
+        var edgeGeo = new THREE.EdgesGeometry(geo);
+        var edgeMat = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.45,
+        });
+        var edgeLine = new THREE.LineSegments(edgeGeo, edgeMat);
+        card.add(edgeLine);
+
+        card.userData = {
+            index: ci,
+            pos: { x: 0, y: 0, z: 0 },
+            rot: { x: 0, y: 0, z: 0 },
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.5 + Math.random() * 1.2,
+        };
+
+        /* 如果配置了真实图片路径，异步加载替换占位纹理 */
+        if (imagePaths[ci]) {
+            (function (cardMesh, path) {
+                var img = new Image();
+                img.onload = function () {
+                    var realTex = new THREE.Texture(img);
+                    realTex.encoding = THREE.sRGBEncoding;
+                    realTex.needsUpdate = true;
+                    cardMesh.material.map.dispose();
+                    cardMesh.material.map = realTex;
+                    cardMesh.material.needsUpdate = true;
+                };
+                img.src = path;
+            })(card, imagePaths[ci]);
+        }
+
+        scene.add(card);
+        cards.push(card);
+    }
+
+    /* ==================== 三种布局函数 ==================== */
+
+    var COLS = 7;
+    var ROWS = 5;
+    var SPC_X = 3.5;
+    var SPC_Y = 4.5;
+
+    function gridLayout() {
+        var result = [];
+        for (var i = 0; i < cardCount; i++) {
+            var col = i % COLS;
+            var row = Math.floor(i / COLS);
+            var x = (col - (COLS - 1) / 2) * SPC_X;
+            var y = (row - (ROWS - 1) / 2) * SPC_Y;
+            result.push({ x: x, y: y, z: 0, rotX: 0, rotY: 0, rotZ: 0 });
+        }
+        return result;
+    }
+
+    function helixLayout() {
+        var R = 11;
+        var n = cardCount;
+        var result = [];
+        for (var i = 0; i < n; i++) {
+            var t = (i / (n - 1)) * Math.PI * 4;
+            var x = R * Math.cos(t);
+            var y = (i / (n - 1)) * 30 - 15;
+            var z = R * Math.sin(t);
+            var rotY = Math.PI / 2 - t;
+            result.push({ x: x, y: y, z: z, rotX: 0, rotY: rotY, rotZ: 0 });
+        }
+        return result;
+    }
+
+    function waveLayout() {
+        var result = [];
+        for (var i = 0; i < cardCount; i++) {
+            var col = i % COLS;
+            var row = Math.floor(i / COLS);
+            var x = (col - (COLS - 1) / 2) * SPC_X;
+            var baseY = (row - (ROWS - 1) / 2) * SPC_Y;
+            var y = baseY + Math.sin(x * 0.55) * 3.5;
+            var z = Math.sin(x * 0.45) * 6;
+            var rotX = Math.cos(x * 0.45) * 0.3;
+            result.push({ x: x, y: y, z: z, rotX: rotX, rotY: 0, rotZ: 0 });
+        }
+        return result;
+    }
+
+    var layouts = {
+        grid: gridLayout,
+        helix: helixLayout,
+        wave: waveLayout,
+    };
+
+    /* ==================== 切换布局 ==================== */
+
+    function switchLayout(name, duration) {
+        if (duration === undefined) {
+            duration = 1.4;
+        }
+        var targets = layouts[name]();
+        for (var i = 0; i < cards.length; i++) {
+            var card = cards[i];
+            var tgt = targets[i];
+            gsap.killTweensOf(card.userData.pos);
+            gsap.killTweensOf(card.userData.rot);
+            gsap.to(card.userData.pos, {
+                x: tgt.x,
+                y: tgt.y,
+                z: tgt.z,
+                duration: duration,
+                ease: "power2.inOut",
+                overwrite: true,
+            });
+            gsap.to(card.userData.rot, {
+                x: tgt.rotX || 0,
+                y: tgt.rotY || 0,
+                z: tgt.rotZ || 0,
+                duration: duration,
+                ease: "power2.inOut",
+                overwrite: true,
+            });
+        }
+    }
+
+    /* ==================== UI 按钮 ==================== */
+
+    var buttons = document.querySelectorAll(".controls button");
+    buttons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            buttons.forEach(function (b) {
+                b.classList.remove("active");
+            });
+            btn.classList.add("active");
+            switchLayout(btn.dataset.layout);
+        });
+    });
+
+    /* ==================== 初始化位置（网格布局，无动画） ==================== */
+
+    var initGrid = gridLayout();
+    for (var ii = 0; ii < cards.length; ii++) {
+        var cardInit = cards[ii];
+        var posInit = initGrid[ii];
+        cardInit.userData.pos.x = posInit.x;
+        cardInit.userData.pos.y = posInit.y;
+        cardInit.userData.pos.z = posInit.z;
+        cardInit.userData.rot.x = posInit.rotX || 0;
+        cardInit.userData.rot.y = posInit.rotY || 0;
+        cardInit.userData.rot.z = posInit.rotZ || 0;
+        cardInit.position.set(posInit.x, posInit.y, posInit.z);
+        cardInit.rotation.set(posInit.rotX || 0, posInit.rotY || 0, posInit.rotZ || 0);
+    }
+
+    /* ==================== 动画循环 ==================== */
+
+    function animate(timestamp) {
+        requestAnimationFrame(animate);
+
+        var time = timestamp * 0.001;
+        controls.update();
+
+        /* 更新爱心粒子 */
+        var posArr = heartGeo.attributes.position.array;
+        for (var hi = 0; hi < heartCount; hi++) {
+            var hd = heartData[hi];
+            hd.y += hd.speed * 0.018;
+            if (hd.y > 22) {
+                hd.y = -22;
+                hd.baseX = (Math.random() - 0.5) * 55;
+                hd.baseZ = (Math.random() - 0.5) * 55;
+            }
+            var hIdx = hi * 3;
+            posArr[hIdx] = hd.baseX + Math.sin(time * hd.speed + hd.phase) * hd.amp;
+            posArr[hIdx + 1] = hd.y;
+            posArr[hIdx + 2] = hd.baseZ + Math.cos(time * hd.speed * 0.7 + hd.phase) * hd.amp * 0.7;
+        }
+        heartGeo.attributes.position.needsUpdate = true;
+
+        /* 更新卡片：基础位置 + 浮动偏移 */
+        for (var ci2 = 0; ci2 < cards.length; ci2++) {
+            var cardLoop = cards[ci2];
+            var p = cardLoop.userData.pos;
+            var r = cardLoop.userData.rot;
+            var phase = cardLoop.userData.phase;
+            var spd = cardLoop.userData.speed;
+
+            var floatX = Math.cos(time * spd * 0.7 + phase) * 0.12;
+            var floatY = Math.sin(time * spd + phase) * 0.15;
+            var floatZ = Math.sin(time * spd * 0.5 + phase) * 0.1;
+
+            var tiltX = Math.sin(time * spd * 0.6 + phase) * 0.025;
+            var tiltY = Math.cos(time * spd * 0.8 + phase) * 0.025;
+            var tiltZ = Math.cos(time * spd * 0.4 + phase) * 0.018;
+
+            cardLoop.position.set(
+                p.x + floatX,
+                p.y + floatY,
+                p.z + floatZ
+            );
+            cardLoop.rotation.set(
+                r.x + tiltX,
+                r.y + tiltY,
+                r.z + tiltZ
+            );
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    /* ==================== 窗口缩放 ==================== */
+
+    window.addEventListener("resize", function () {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    /* ==================== 启动 ==================== */
+
+    requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
